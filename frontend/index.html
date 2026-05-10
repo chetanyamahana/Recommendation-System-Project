@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShopBot — AI Product Recommender</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col font-sans">
+    
+    <!-- Top Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-md">
+        <h1 class="text-2xl font-bold">ShopBot — AI Product Recommender</h1>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Left Panel: Filters -->
+        <aside class="w-[30%] bg-white p-6 shadow-md border-r border-gray-200 overflow-y-auto flex flex-col gap-6">
+            <h2 class="text-lg font-semibold border-b pb-2">Filters</h2>
+            
+            <div class="flex flex-col gap-2">
+                <label for="category" class="font-medium text-gray-700">Category</label>
+                <select id="category" class="border border-gray-300 p-2 rounded focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">All Categories</option>
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label for="max_price" class="font-medium text-gray-700">Max Price ($)</label>
+                <input type="number" id="max_price" placeholder="e.g. 50000" class="border border-gray-300 p-2 rounded focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label for="min_rating" class="font-medium text-gray-700">Min Rating: <span id="rating_val">1</span></label>
+                <input type="range" id="min_rating" min="1" max="5" step="0.5" value="1" class="w-full" oninput="document.getElementById('rating_val').innerText=this.value">
+            </div>
+        </aside>
+
+        <!-- Right Panel: Chat and Results -->
+        <main class="w-[70%] flex flex-col bg-gray-50 relative">
+            <div id="chat_area" class="flex-1 p-6 overflow-y-auto flex flex-col gap-4">
+                <!-- Welcome message -->
+                <div class="bg-white p-4 rounded-lg shadow w-3/4 text-gray-800 self-start">
+                    Hello! I'm ShopBot. What are you looking to buy today?
+                </div>
+            </div>
+
+            <!-- Loading Spinner (Hidden by default) -->
+            <div id="loading_indicator" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex-col items-center bg-white p-4 rounded shadow-lg z-10">
+                <div class="loader mb-2"></div>
+                <p class="text-sm text-gray-600">Finding the best products...</p>
+            </div>
+
+            <!-- Input Area -->
+            <div class="p-4 bg-white border-t border-gray-200 flex gap-2">
+                <input type="text" id="query_input" placeholder="Type your search query here..." class="flex-1 border border-gray-300 p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" onkeypress="if(event.key==='Enter') sendMessage()">
+                <button onclick="sendMessage()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium transition-colors">Send</button>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Fetch categories on load
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('http://localhost:8000/products');
+                if (res.ok) {
+                    const products = await res.json();
+                    const categories = [...new Set(products.map(p => p.category))];
+                    const catSelect = document.getElementById('category');
+                    categories.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c;
+                        opt.textContent = c;
+                        catSelect.appendChild(opt);
+                    });
+                }
+            } catch (error) {
+                console.error("Could not load categories", error);
+            }
+        });
+
+        async function sendMessage() {
+            const query = document.getElementById('query_input').value.trim();
+            if (!query) return;
+
+            const category = document.getElementById('category').value;
+            const maxPrice = document.getElementById('max_price').value;
+            const minRating = document.getElementById('min_rating').value;
+
+            const chatArea = document.getElementById('chat_area');
+            const loader = document.getElementById('loading_indicator');
+            const queryInput = document.getElementById('query_input');
+
+            // Add user message
+            const userMsg = document.createElement('div');
+            userMsg.className = "bg-blue-100 p-4 rounded-lg shadow w-3/4 text-gray-800 self-end";
+            userMsg.textContent = query;
+            chatArea.appendChild(userMsg);
+            
+            // Clear input and show loading
+            queryInput.value = '';
+            loader.classList.remove('hidden');
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            try {
+                const payload = {
+                    query: query,
+                    top_k: 5
+                };
+                if (category) payload.category = category;
+                if (maxPrice) payload.max_price = parseFloat(maxPrice);
+                if (minRating > 1) payload.rating = parseFloat(minRating);
+
+                const response = await fetch('http://localhost:8000/recommend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error("API failed");
+                const data = await response.json();
+
+                // Add bot text response
+                const botMsg = document.createElement('div');
+                botMsg.className = "bg-white p-4 rounded-lg shadow w-3/4 text-gray-800 self-start";
+                botMsg.textContent = data.response;
+                chatArea.appendChild(botMsg);
+
+                // Add product grid
+                if (data.products && data.products.length > 0) {
+                    const grid = document.createElement('div');
+                    grid.className = "grid grid-cols-2 gap-4 w-3/4 self-start mt-2";
+                    
+                    data.products.forEach(p => {
+                        const desc = p.description.length > 100 ? p.description.substring(0, 100) + '...' : p.description;
+                        const card = document.createElement('div');
+                        card.className = "bg-white border border-gray-200 p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col";
+                        const imgHtml = p.image ? `<img src="${p.image}" alt="${p.title}" class="w-full h-32 object-contain mb-3 rounded">` : '';
+                        card.innerHTML = `
+                            ${imgHtml}
+                            <h3 class="font-semibold text-gray-800 truncate" title="${p.title}">${p.title}</h3>
+                            <div class="flex justify-between items-center mt-2">
+                                <span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded truncate max-w-[60%]">${p.category}</span>
+                                <span class="text-sm font-bold text-green-600">$${p.price}</span>
+                            </div>
+                            <div class="text-yellow-500 text-sm mt-1">★ ${p.rating}</div>
+                            <p class="text-gray-600 text-xs mt-2 h-12 overflow-hidden">${desc}</p>
+                        `;
+                        grid.appendChild(card);
+                    });
+                    chatArea.appendChild(grid);
+                }
+            } catch (error) {
+                const errorMsg = document.createElement('div');
+                errorMsg.className = "bg-red-100 p-4 rounded-lg shadow w-3/4 text-red-800 self-start";
+                errorMsg.textContent = "Error: Could not fetch recommendations. Make sure the backend server is running on port 8000.";
+                chatArea.appendChild(errorMsg);
+            } finally {
+                loader.classList.add('hidden');
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>
