@@ -103,3 +103,29 @@ def get_products(category: Optional[str] = None, min_rating: Optional[float] = N
         
     return filtered.to_dict(orient="records")
 
+@app.get("/trending")
+def get_trending_products(top_k: int = 10, category: Optional[str] = None):
+    """
+    Returns trending products to solve the Cold Start problem for new users.
+    Trending is determined by high ratings and highest number of total reviews.
+    """
+    if products_df is None:
+        raise HTTPException(status_code=500, detail="Data not loaded.")
+        
+    filtered = products_df.copy()
+    if category:
+        filtered = filtered[filtered['category'].str.lower() == category.lower()]
+        
+    # Clean up Total Ratings which might be strings with commas like "1,677"
+    filtered['Total Ratings'] = pd.to_numeric(filtered['Total Ratings'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    filtered['rating'] = pd.to_numeric(filtered['rating'], errors='coerce').fillna(0)
+    
+    # Filter for good quality (e.g. rating >= 4.0) and sort by popularity (Total Ratings)
+    trending = filtered[filtered['rating'] >= 4.0].sort_values(by='Total Ratings', ascending=False)
+    
+    # If we don't have enough highly rated products, just sort by Total Ratings
+    if len(trending) < top_k:
+        trending = filtered.sort_values(by='Total Ratings', ascending=False)
+        
+    return trending.head(top_k).to_dict(orient="records")
+
